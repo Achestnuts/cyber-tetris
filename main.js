@@ -72,10 +72,45 @@
 
   let board,active,nextQ,selectedIdx,selAnim,holdClear,score,lines,level,dropMs,accMs,alive,paused,animating,clearInfo,softDropTick
 
+  let actx,master
+  const ensureAudio=async()=>{
+    try{
+      if(!actx) {
+        actx=new (window.AudioContext||window.webkitAudioContext)()
+        master=actx.createGain()
+        master.gain.value=0.12
+        master.connect(actx.destination)
+      }
+      if(actx.state==="suspended") await actx.resume()
+    }catch(e){}
+  }
+  const tone=(f,d,type="sine",v=1)=>{
+    if(!actx) return
+    const o=actx.createOscillator()
+    const g=actx.createGain()
+    o.type=type;o.frequency.value=f
+    g.gain.value=0.0001
+    o.connect(g);g.connect(master)
+    const t=actx.currentTime
+    g.gain.linearRampToValueAtTime(0.12*v,t+0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001,t+d)
+    o.start(t);o.stop(t+d+0.02)
+  }
+  const playSound=async(name)=>{
+    await ensureAudio()
+    if(!actx) return
+    if(name==="move") tone(220,0.04,"square",0.6)
+    else if(name==="rotate") tone(360,0.08,"triangle",0.9)
+    else if(name==="drop") tone(130,0.12,"sawtooth",1.0)
+    else if(name==="select") tone(520,0.06,"sine",0.8)
+    else if(name==="clear"){ tone(400,0.06,"triangle",0.9); setTimeout(()=>tone(600,0.06,"triangle",0.9),50) }
+    else if(name==="over"){ tone(440,0.18,"sawtooth",0.9); setTimeout(()=>tone(220,0.22,"sawtooth",0.9),120) }
+  }
+
   const reset=()=>{
     board=Array.from({length:ROWS},()=>Array(COLS).fill(null))
     active=drawFromBag()
-    nextQ=[drawFromBag(),drawFromBag(),drawFromBag()]
+    nextQ=[drawFromBag(),drawFromBag()]
     selectedIdx=0; selAnim=0
     score=0;lines=0;level=1
     dropMs=700;accMs=0;alive=true;paused=true;animating=false;clearInfo=null;softDropTick=0
@@ -145,7 +180,7 @@
   }
 
   const spawn=()=>{
-    if(!nextQ||nextQ.length<3){ nextQ=[drawFromBag(),drawFromBag(),drawFromBag()] }
+    if(!nextQ||nextQ.length<2){ nextQ=[drawFromBag(),drawFromBag()] }
     active=nextQ[selectedIdx]
     nextQ.splice(selectedIdx,1)
     nextQ.push(drawFromBag())
@@ -333,14 +368,14 @@
 
   const move=(dx)=>{
     if(paused||animating) return
-    if(!collide(active.shape,active.x+dx,active.y)) active.x+=dx
+    if(!collide(active.shape,active.x+dx,active.y)) {active.x+=dx; playSound("move")}
   }
   const rotateAct=()=>{
     if(paused||animating) return
     const r=rotate(active.shape)
-    if(!collide(r,active.x,active.y)) active.shape=r
-    else if(!collide(r,active.x-1,active.y)) {active.x-=1;active.shape=r}
-    else if(!collide(r,active.x+1,active.y)) {active.x+=1;active.shape=r}
+    if(!collide(r,active.x,active.y)) {active.shape=r; playSound("rotate")}
+    else if(!collide(r,active.x-1,active.y)) {active.x-=1;active.shape=r; playSound("rotate")}
+    else if(!collide(r,active.x+1,active.y)) {active.x+=1;active.shape=r; playSound("rotate")}
   }
 
   const keyMap=e=>{
@@ -371,32 +406,28 @@
   btnRight.addEventListener("touchend",e=>{e.preventDefault();clearHold(holdR)})
   btnDown.addEventListener("touchstart",e=>{e.preventDefault();pressHold(()=>softDrop(),v=>holdD=v)})
   btnDown.addEventListener("touchend",e=>{e.preventDefault();clearHold(holdD)})
-  btnRotate.addEventListener("click",()=>rotateAct())
-  btnDrop.addEventListener("click",()=>hardDrop())
+  btnRotate.addEventListener("click",()=>{rotateAct()})
+  btnDrop.addEventListener("click",()=>{hardDrop()})
   btnPause.addEventListener("click",()=>pause())
-  btnStart.addEventListener("click",()=>{start()})
+  btnStart.addEventListener("click",()=>{start();ensureAudio()})
   btnResume.addEventListener("click",()=>{paused=false;overlay.classList.add("hidden")})
   btnRestart.addEventListener("click",()=>{reset();start()})
 
   const setSelection=i=>{
-    const ni=Math.max(0,Math.min(2,i))
-    if(ni!==selectedIdx){ selectedIdx=ni }
+    const ni=Math.max(0,Math.min(1,i))
+    if(ni!==selectedIdx){ selectedIdx=ni; playSound("select") }
   }
   if(nextCanvas){
-    let tx=0,drag=false
-    nextCanvas.addEventListener("touchstart",e=>{ if(!e.touches.length) return; tx=e.touches[0].clientX; drag=true })
-    nextCanvas.addEventListener("touchmove",e=>{
-      if(!drag||!e.touches.length) return
-    })
-    nextCanvas.addEventListener("touchend",e=>{
-      drag=false
-      if(!e.changedTouches||!e.changedTouches.length) return
-      const dx=e.changedTouches[0].clientX-tx
-      if(Math.abs(dx)>20){
-        if(dx>0) setSelection(selectedIdx+1)
-        else setSelection(selectedIdx-1)
-      }
-    })
+    const pick=(clientX)=>{
+      const rect=nextCanvas.getBoundingClientRect()
+      const x=clientX-rect.left
+      const w=nextCanvas.clientWidth||128
+      const slotW=Math.floor(w/2)
+      const idx=Math.max(0,Math.min(1,Math.floor(x/slotW)))
+      setSelection(idx)
+    }
+    nextCanvas.addEventListener("click",e=>{ pick(e.clientX) })
+    nextCanvas.addEventListener("touchend",e=>{ if(!e.changedTouches||!e.changedTouches.length) return; pick(e.changedTouches[0].clientX) })
   }
 
   const showToast=txt=>{
@@ -476,17 +507,16 @@
   document.addEventListener("keydown",e=>{
     if(e.key==="1") setSelection(0)
     else if(e.key==="2") setSelection(1)
-    else if(e.key==="3") setSelection(2)
   })
 
   function drawNext(){
     if(!nextCanvas||!nctx) return
-    const w=nextCanvas.clientWidth||160
+    const w=nextCanvas.clientWidth||128
     const h=nextCanvas.clientHeight||72
     nctx.clearRect(0,0,w,h)
-    if(!nextQ||nextQ.length<3) return
-    selAnim = selAnim + (selectedIdx - selAnim)*0.18
-    const slots=3
+    if(!nextQ||nextQ.length<2) return
+    selAnim = selAnim + (selectedIdx - selAnim)*0.2
+    const slots=2
     const slotW=Math.floor(w/slots)
     const slotH=h
     // selection glow bar

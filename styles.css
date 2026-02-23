@@ -45,7 +45,7 @@ body{
 }
 .label{font-size:12px;letter-spacing:2px;color:var(--muted)}
 .value{font-size:22px;letter-spacing:1px;margin-top:2px}
-.hud-next #nextCanvas,#nextCanvas{width:160px;height:72px;display:block;margin:4px auto 0;image-rendering:pixelated;}
+.hud-next #nextCanvas,#nextCanvas{width:128px;height:72px;display:block;margin:4px auto 0;image-rendering:pixelated;}
 .stage-wrap{
   position:relative;
   flex:1;
@@ -132,7 +132,7 @@ body{
   .controls{display:none}
   .panel{max-height:48vh}
   .kbd-hints{display:block}
-  #nextCanvas{width:240px;height:88px}
+  #nextCanvas{width:180px;height:88px}
 }
 @media (orientation:landscape) and (pointer:coarse){
   body::before{
