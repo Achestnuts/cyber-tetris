@@ -25,6 +25,8 @@
   const btnShare=$("#btnShare")
   const btnClear=$("#btnClear")
   const toast=$("#toast")
+  const nextCanvas=$("#nextCanvas")
+  const nctx=nextCanvas?nextCanvas.getContext("2d"):null
 
   let W=stage.clientWidth
   let H=stage.clientHeight
@@ -60,6 +62,7 @@
     const k=seq.pop()
     return {k,shape:shapes[k].map(r=>r.slice()),x:Math.floor((COLS-2)/2),y:0,color:palette[keys.indexOf(k)%palette.length]}
   }
+  const drawFromBag=()=>nextPiece()
   const rotate=m=>{
     const h=m.length,w=m[0].length
     const r=Array.from({length:w},()=>Array(h).fill(0))
@@ -67,11 +70,13 @@
     return r
   }
 
-  let board,active,holdClear,score,lines,level,dropMs,accMs,alive,paused,animating,clearInfo,softDropTick
+  let board,active,nextQ,selectedIdx,selAnim,holdClear,score,lines,level,dropMs,accMs,alive,paused,animating,clearInfo,softDropTick
 
   const reset=()=>{
     board=Array.from({length:ROWS},()=>Array(COLS).fill(null))
-    active=nextPiece()
+    active=drawFromBag()
+    nextQ=[drawFromBag(),drawFromBag(),drawFromBag()]
+    selectedIdx=0; selAnim=0
     score=0;lines=0;level=1
     dropMs=700;accMs=0;alive=true;paused=true;animating=false;clearInfo=null;softDropTick=0
     updateHUD()
@@ -140,7 +145,11 @@
   }
 
   const spawn=()=>{
-    active=nextPiece()
+    if(!nextQ||nextQ.length<3){ nextQ=[drawFromBag(),drawFromBag(),drawFromBag()] }
+    active=nextQ[selectedIdx]
+    nextQ.splice(selectedIdx,1)
+    nextQ.push(drawFromBag())
+    if(selectedIdx>=nextQ.length) selectedIdx=nextQ.length-1
     active.x=Math.floor((COLS-active.shape[0].length)/2)
     active.y=-1
     if(collide(active.shape,active.x,active.y+1)){
@@ -264,6 +273,7 @@
     drawBoard()
     if(active&&alive) drawPiece()
     drawClearFx()
+    drawNext()
   }
 
   let last=performance.now()
@@ -283,6 +293,16 @@
     draw()
   }
   window.addEventListener("resize",resize)
+  const resizeNext=()=>{
+    if(!nextCanvas) return
+    const dpr=window.devicePixelRatio||1
+    const w=nextCanvas.clientWidth||96
+    const h=nextCanvas.clientHeight||96
+    nextCanvas.width=w*dpr
+    nextCanvas.height=h*dpr
+    nctx.setTransform(dpr,0,0,dpr,0,0)
+  }
+  window.addEventListener("resize",resizeNext)
 
   const gameOver=()=>{
     alive=false
@@ -358,6 +378,27 @@
   btnResume.addEventListener("click",()=>{paused=false;overlay.classList.add("hidden")})
   btnRestart.addEventListener("click",()=>{reset();start()})
 
+  const setSelection=i=>{
+    const ni=Math.max(0,Math.min(2,i))
+    if(ni!==selectedIdx){ selectedIdx=ni }
+  }
+  if(nextCanvas){
+    let tx=0,drag=false
+    nextCanvas.addEventListener("touchstart",e=>{ if(!e.touches.length) return; tx=e.touches[0].clientX; drag=true })
+    nextCanvas.addEventListener("touchmove",e=>{
+      if(!drag||!e.touches.length) return
+    })
+    nextCanvas.addEventListener("touchend",e=>{
+      drag=false
+      if(!e.changedTouches||!e.changedTouches.length) return
+      const dx=e.changedTouches[0].clientX-tx
+      if(Math.abs(dx)>20){
+        if(dx>0) setSelection(selectedIdx+1)
+        else setSelection(selectedIdx-1)
+      }
+    })
+  }
+
   const showToast=txt=>{
     toast.textContent=txt
     toast.classList.remove("hidden")
@@ -430,5 +471,63 @@
   reset()
   start()
   renderBoard()
-})();
+  resizeNext()
 
+  document.addEventListener("keydown",e=>{
+    if(e.key==="1") setSelection(0)
+    else if(e.key==="2") setSelection(1)
+    else if(e.key==="3") setSelection(2)
+  })
+
+  function drawNext(){
+    if(!nextCanvas||!nctx) return
+    const w=nextCanvas.clientWidth||160
+    const h=nextCanvas.clientHeight||72
+    nctx.clearRect(0,0,w,h)
+    if(!nextQ||nextQ.length<3) return
+    selAnim = selAnim + (selectedIdx - selAnim)*0.18
+    const slots=3
+    const slotW=Math.floor(w/slots)
+    const slotH=h
+    // selection glow bar
+    const sx=selAnim*slotW
+    nctx.save()
+    nctx.globalAlpha=0.8
+    const grd=nctx.createLinearGradient(sx,0,sx+slotW,0)
+    grd.addColorStop(0,"rgba(0,234,255,0.10)")
+    grd.addColorStop(0.5,"rgba(255,0,230,0.25)")
+    grd.addColorStop(1,"rgba(0,234,255,0.10)")
+    nctx.fillStyle=grd
+    nctx.fillRect(sx+4,4,slotW-8,slotH-8)
+    nctx.restore()
+    for(let i=0;i<slots;i++){
+      const item=nextQ[i]
+      if(!item) continue
+      const m=item.shape
+      const cw=Math.floor(Math.min((slotW-16)/4,(slotH-16)/4))
+      const mw=m[0].length,mh=m.length
+      const nx=i*slotW + Math.floor((slotW - cw*mw)/2)
+      const ny=Math.floor((slotH - cw*mh)/2)
+      for(let y=0;y<mh;y++){
+        for(let x=0;x<mw;x++){
+          if(!m[y][x]) continue
+          const px=nx+x*cw
+          const py=ny+y*cw
+          const r=Math.floor(cw*0.22)
+          const g=nctx.createLinearGradient(px,py,px,py+cw)
+          g.addColorStop(0,item.color)
+          g.addColorStop(1,"#0e1320")
+          nctx.fillStyle=g
+          nctx.beginPath()
+          nctx.moveTo(px+r,py)
+          nctx.arcTo(px+cw,py,px+cw,py+cw,r)
+          nctx.arcTo(px+cw,py+cw,px,py+cw,r)
+          nctx.arcTo(px,py+cw,px,py,r)
+          nctx.arcTo(px,py,px+cw,py,r)
+          nctx.closePath()
+          nctx.fill()
+        }
+      }
+    }
+  }
+})();
